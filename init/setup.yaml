@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+    name: "init"
+    namespace: "heat-scheduling"
+spec:
+    containers:
+        - name: "nit"
+          image: "gcr.io/bep-matosi/init"
+          ports:
+            - containerPort: 8080
+    restartPolicy: "Always"
+

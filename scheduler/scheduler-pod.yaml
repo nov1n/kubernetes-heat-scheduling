@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: scheduler
+spec:
+  containers:
+  - command:
+    - /usr/local/bin/kube-scheduler
+    - --address=0.0.0.0
+    - --scheduler-name=my-scheduler
+    - --master=http://localhost:8080
+    image: my-kube-scheduler:1.0.2
+    name: sched
+  - name: kubectl
+    image: my-kubectl:1.0.1
+    command: ["/usr/local/bin/kubectl", "proxy", "-p", "8001"]

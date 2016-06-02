@@ -3,11 +3,13 @@ kind: Pod
 metadata:
     name: "init"
     namespace: "heat-scheduling"
+    labels:
+        sel: "init"
 spec:
     containers:
-        - name: "nit"
-          image: "gcr.io/bep-matosi/init"
+        - name: "init"
+          image: "gcr.io/bep-matosi/init:1.0.0"
           ports:
-            - containerPort: 8080
+            - containerPort: 8090
     restartPolicy: "Always"
 

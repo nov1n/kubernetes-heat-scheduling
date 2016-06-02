@@ -24,9 +24,15 @@ const (
 )
 
 func main() {
+	http.HandleFunc("/", hello)
 	http.HandleFunc("/setup", setup)
 	fmt.Printf("Listening on localhost%v", port)
 	http.ListenAndServe(":"+port, nil)
+}
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello!")
+	return
 }
 
 // Setup computes initial joule value for each node from a normal distribution.
@@ -69,7 +75,7 @@ func setup(w http.ResponseWriter, r *http.Request) {
 		joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
 		node.Labels[joulesLabelName] = joulesString
 		nodeClient.Update(&node)
-		logAndWrite(w, "updated node %s label: %s=%s", node.Name, joulesLabelName, joulesString)
+		logAndWrite(w, "updated node %s label: %s=%s\n", node.Name, joulesLabelName, joulesString)
 	}
 }
 
@@ -87,10 +93,10 @@ func normFloat(stdIn, meanIn float64) float64 {
 func parseFloatInto(dest *float64, source string) {
 	parsed, err := strconv.ParseFloat(source, 64)
 	if err != nil {
-		fmt.Printf("error converting string '%v' to float, using default", source)
+		fmt.Printf("error converting string '%v' to float, using default\n", source)
 		return
 	}
-	fmt.Printf("converted string %v to float", source)
+	fmt.Printf("converted string %v to float\n", source)
 	*dest = parsed
 }
 

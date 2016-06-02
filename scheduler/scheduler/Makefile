@@ -21,8 +21,8 @@ TAG = "v1.0.0"
 
 container:
 	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	docker build -t gcr.io/bep-matosi/kube-scheduler:$(TAG) .
+	docker build -t gcr.io/bep-matosi/heat-scheduler:$(TAG) .
 
 push: container
 	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	gcloud docker push gcr.io/bep-matosi/kube-scheduler:$(TAG)
+	gcloud docker push gcr.io/bep-matosi/heat-scheduler:$(TAG)

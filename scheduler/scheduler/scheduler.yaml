@@ -4,8 +4,8 @@ metadata:
   labels:
     component: scheduler
     tier: control-plane
-  name: my-scheduler
-  namespace: default
+  name: heat-scheduler
+  namespace: heat-scheduling
 spec:
   replicas: 1
   template:
@@ -17,14 +17,14 @@ spec:
     spec:
       containers:
       - command: [/usr/local/bin/kube-scheduler, --address=0.0.0.0,
-                  --scheduler-name=my-scheduler, --policy-config-file=policy-config-file.json]
-        image: gcr.io/bep-matosi/kube-scheduler:v1.0.0
+                  --scheduler-name=heat-scheduler, --policy-config-file=policy-config-file.json]
+        image: gcr.io/bep-matosi/heat-scheduler:1.0.0
         livenessProbe:
           httpGet:
             path: /healthz
             port: 10251
           initialDelaySeconds: 15
-        name: kube-second-scheduler
+        name: heat-scheduler
         readinessProbe:
           httpGet:
             path: /healthz

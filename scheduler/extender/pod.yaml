@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+    name: scheduler-extender
+    namespace: heat-scheduling
+    labels:
+        sel: scheduler-extender
+spec:
+    containers:
+        - name: scheduler-extender
+          image: scheduler-extender:1.0.0
+          ports:
+            - containerPort: 8100
+    restartPolicy: "Always"

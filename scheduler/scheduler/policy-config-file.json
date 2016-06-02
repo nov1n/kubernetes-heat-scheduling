@@ -4,7 +4,7 @@
 "predicates" : [],
 "extenders": [
     {
-      "urlPrefix": "http://127.0.0.1:8100/api/scheduler",
+      "urlPrefix": "http://10.0.0.2",
 			"apiVersion": "v1",
       "filterVerb": "filter",
       "enableHttps": false

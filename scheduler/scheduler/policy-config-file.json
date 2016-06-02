@@ -1,0 +1,13 @@
+{
+"kind" : "Policy",
+"apiVersion" : "v1",
+"predicates" : [],
+"extenders": [
+    {
+      "urlPrefix": "http://127.0.0.1:8100/api/scheduler",
+			"apiVersion": "v1",
+      "filterVerb": "filter",
+      "enableHttps": false
+    }
+  ]
+}

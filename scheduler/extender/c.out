@@ -1,0 +1,22 @@
+mode: set
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:14.54,18.16 4 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:23.2,23.39 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:27.2,29.16 3 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:35.2,44.8 6 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:18.16,21.3 2 0
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:23.39,25.3 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:29.16,31.3 0 0
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:31.3,33.3 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:47.57,48.27 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:53.2,54.35 2 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:59.2,59.35 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:65.2,65.52 1 0
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:48.27,50.3 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:54.35,56.3 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:59.35,60.36 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:60.36,62.4 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:68.46,70.12 2 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:76.2,76.24 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:70.12,72.17 2 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:72.17,74.4 1 1
+github.com/nov1n/kubernetes-heat-scheduling/scheduler/extender/main.go:79.13,92.2 6 0

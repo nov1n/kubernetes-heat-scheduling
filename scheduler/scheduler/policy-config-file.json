@@ -4,7 +4,7 @@
 "predicates" : [],
 "extenders": [
     {
-      "urlPrefix": "http://10.0.0.2",
+      "urlPrefix": "http://scheduler-extender-svc",
 			"apiVersion": "v1",
       "filterVerb": "filter",
       "enableHttps": false

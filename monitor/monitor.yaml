@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "monitor"
+  namespace: "heat-scheduling"
+spec:
+  containers:
+    - name: "monitor"
+      image: "gcr.io/bep-matosi/monitor:1.0.2"
+  restartPolicy: "Always"

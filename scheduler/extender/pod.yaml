@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-    name: scheduler-extender
+    name: heat-scheduler-extdr
     namespace: heat-scheduling
     labels:
-        sel: scheduler-extender
+        sel: heat-scheduler-extdr
 spec:
     containers:
-        - name: scheduler-extender
-          image: scheduler-extender:1.0.0
+        - name: heat-scheduler-extdr
+          image: gcr.io/bep-matosi/heat-scheduler-extender:1.0.0
           ports:
             - containerPort: 8100
     restartPolicy: "Always"

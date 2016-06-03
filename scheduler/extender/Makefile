@@ -21,8 +21,8 @@ TAG = "latest"
 
 container:
 	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	docker build -t gcr.io/bep-matosi/heat-scheduler:$(TAG) .
+	docker build -t gcr.io/bep-matosi/heat-scheduler-extender:$(TAG) .
 
 push: container
 	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	gcloud docker push gcr.io/bep-matosi/heat-scheduler:$(TAG)
+	gcloud docker push gcr.io/bep-matosi/heat-scheduler-extender:$(TAG)

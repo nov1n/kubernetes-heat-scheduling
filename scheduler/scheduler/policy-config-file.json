@@ -4,7 +4,7 @@
 "predicates" : [],
 "extenders": [
     {
-      "urlPrefix": "http://scheduler-extender-svc",
+      "urlPrefix": "http://heat-scheduler-extdr-svc.heat-scheduling",
 			"apiVersion": "v1",
       "filterVerb": "filter",
       "enableHttps": false

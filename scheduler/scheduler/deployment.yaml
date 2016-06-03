@@ -16,9 +16,9 @@ spec:
         version: second
     spec:
       containers:
-      - command: [/usr/local/bin/kube-scheduler, --address=0.0.0.0,
+      - command: [/usr/local/bin/kube-scheduler, --address=0.0.0.0, --v=5,
                   --scheduler-name=heat-scheduler, --policy-config-file=policy-config-file.json]
-        image: gcr.io/bep-matosi/heat-scheduler:1.0.0
+        image: gcr.io/bep-matosi/heat-scheduler:1.0.2
         livenessProbe:
           httpGet:
             path: /healthz

@@ -92,6 +92,21 @@
 			"Rev": "fd52762d25a41827db7ef64c43756fd4b9f7e382"
 		},
 		{
+			"ImportPath": "github.com/influxdata/influxdb/client/v2",
+			"Comment": "v0.13.0-249-g573d7ed",
+			"Rev": "573d7ed4e443573839057769f825761dcb16b3f4"
+		},
+		{
+			"ImportPath": "github.com/influxdata/influxdb/models",
+			"Comment": "v0.13.0-249-g573d7ed",
+			"Rev": "573d7ed4e443573839057769f825761dcb16b3f4"
+		},
+		{
+			"ImportPath": "github.com/influxdata/influxdb/pkg/escape",
+			"Comment": "v0.13.0-249-g573d7ed",
+			"Rev": "573d7ed4e443573839057769f825761dcb16b3f4"
+		},
+		{
 			"ImportPath": "github.com/juju/ratelimit",
 			"Rev": "77ed1c8a01217656d2080ad51981f6e99adaa177"
 		},

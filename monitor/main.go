@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/influxdata/influxdb/client/v2"
+
 	"k8s.io/kubernetes/pkg/api"
 	k8sRestCl "k8s.io/kubernetes/pkg/client/restclient"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
@@ -20,7 +22,7 @@ const (
 	joulesLabelName         = "joules"
 	k8sHost                 = "127.0.0.1"
 	k8sPort                 = "8080"
-	updateInterval          = 30 * time.Second
+	updateInterval          = 5 * time.Second
 	jouleScaleFactor        = 0.000000001
 	heapsterService         = "http://heapster.kube-system" // DNS name for heapster service
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
@@ -30,10 +32,18 @@ func main() {
 	// Create client
 	client, err := getClient()
 	if err != nil {
-		fmt.Printf("Error getting client: %v", err)
+		fmt.Printf("Error getting client: %v\n", err)
 		return
 	}
 	fmt.Println("Created client")
+
+	// Create Influx client
+	influx, err := NewInfluxClient()
+	if err != nil {
+		fmt.Printf("Error creating influx client: %v\n", err)
+		return
+	}
+	fmt.Println("Created influx client")
 
 	// Update loop
 	stopChan := make(chan struct{})
@@ -45,9 +55,8 @@ func main() {
 			select {
 			case <-ticker.C:
 				fmt.Println("Updating...")
-				update(client, lastUpdate)
-				lastUpdate = time.Now()
-				fmt.Println("Update complete")
+				update(client, influx, lastUpdate)
+				fmt.Println("Update finished")
 			case <-stopChan:
 				ticker.Stop()
 				return
@@ -65,19 +74,20 @@ func getClient() (*k8sClient.Client, error) {
 		}
 		client, err = k8sClient.New(&clientConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Could not create kubernetes client: %v", err)
+			return nil, fmt.Errorf("Could not create kubernetes client: %v\n", err)
 		}
 	}
 	return client, nil
 }
 
-func update(client *k8sClient.Client, lastUpdate time.Time) error {
+func update(client *k8sClient.Client, influx *Client, lastUpdate time.Time) {
 	// List nodes
 	nodeClient := client.Nodes()
 	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
 	nodes, err := nodeClient.List(listAll)
 	if err != nil {
-		return fmt.Errorf("Could not list nodes: %v", err)
+		fmt.Printf("Could not list nodes, trying again in %v: %v\n", updateInterval, err)
+		return
 	}
 	fmt.Printf("Listed %v nodes\n", len(nodes.Items))
 
@@ -101,11 +111,12 @@ func update(client *k8sClient.Client, lastUpdate time.Time) error {
 		}
 
 		// Check if new readings came in
-		if metrics.LatestTimestamp.Before(lastUpdate) {
+		if lastUpdate.Equal(metrics.LatestTimestamp) {
 			// No new readings
 			fmt.Printf("Skipped computing joules, no new readings, skipping ...\n")
 			continue
 		}
+		lastUpdate = metrics.LatestTimestamp
 
 		// Compute new joule value
 		oldJoulesLabel := node.Labels[joulesLabelName]
@@ -131,9 +142,16 @@ func update(client *k8sClient.Client, lastUpdate time.Time) error {
 			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
 			continue
 		}
+
+		// Write updated joules to influx
+		err = influx.Insert(name, newJoules)
+		if err != nil {
+			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+			continue
+		}
+
 		fmt.Printf("Updated joules label for node %s from %s to %s\n", name, oldJoulesLabel, newJoulesLabel)
 	}
-	return nil
 }
 
 type metrics struct {
@@ -150,12 +168,12 @@ type metric struct {
 func getMetricsJSON(endpoint string) ([]byte, error) {
 	resp, err := http.Get(heapsterService + endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("could not get metrics at endpoint %s: %v", endpoint, err)
+		return nil, fmt.Errorf("could not get metrics at endpoint %s: %v\n", endpoint, err)
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("could not read response body: %v", err)
+		return nil, fmt.Errorf("could not read response body: %v\n", err)
 	}
 	return body, nil
 }
@@ -165,7 +183,7 @@ func parseMetrics(metricsJSON []byte) (*metrics, error) {
 	metrics := &metrics{}
 	err := json.Unmarshal(metricsJSON, &metrics)
 	if err != nil {
-		return nil, fmt.Errorf("could not decode metrics response into json: %v", err)
+		return nil, fmt.Errorf("could not decode metrics response into json: %v\n", err)
 	}
 	return metrics, nil
 }
@@ -177,4 +195,77 @@ func computeJoules(metrics *metrics, jouleScaleFactor float64) (float64, error) 
 	fmt.Print(l)
 	joules := (readings[l-1].Value - readings[l-2].Value) * jouleScaleFactor
 	return joules, nil
+}
+
+const (
+	service   = "http://nce-pm-influxdb.default"
+	db        = "k8s"
+	port      = "8086"
+	username  = "root"
+	password  = "root"
+	hostLabel = "hostname"
+)
+
+// Client is able to insert Points into InfluxDB
+type Client struct {
+	HTTP client.Client
+}
+
+// NewInfluxClient returns a new Influx object
+func NewInfluxClient() (*Client, error) {
+	// Make client
+	c, err := client.NewHTTPClient(client.HTTPConfig{
+		Addr:     fmt.Sprintf("%s:%s", service, port),
+		Password: password,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Create database if it does not yet exist
+	query := client.NewQuery(
+		"CREATE DATABASE IF NOT EXISTS joules",
+		db,
+		"s",
+	)
+	_, err = c.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return Influx instance
+	return &Client{
+		HTTP: c,
+	}, nil
+}
+
+// Insert creates and inserts a Point for a given podName and joule value
+func (c *Client) Insert(nodeName string, joulesFloat float64) error {
+	// Create a point
+	tags := map[string]string{
+		hostLabel: nodeName,
+	}
+	fields := map[string]interface{}{
+		"total": joulesFloat,
+	}
+	pt, err := client.NewPoint("joules", tags, fields, time.Now())
+	if err != nil {
+		return err
+	}
+
+	// Create a new point batch
+	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
+		Database:  db,
+		Precision: "s",
+	})
+	bp.AddPoint(pt)
+
+	// Write point to influx
+	err = c.HTTP.Write(bp)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

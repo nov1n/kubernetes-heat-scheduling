@@ -50,7 +50,7 @@ func main() {
 	ticker := time.NewTicker(updateInterval)
 	go func() {
 		fmt.Println("Starting")
-		lastUpdate := time.Now()
+		lastUpdate := make(map[string]time.Time)
 		for {
 			select {
 			case <-ticker.C:
@@ -80,7 +80,7 @@ func getClient() (*k8sClient.Client, error) {
 	return client, nil
 }
 
-func update(client *k8sClient.Client, influx *Client, lastUpdate time.Time) {
+func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time.Time) {
 	// List nodes
 	nodeClient := client.Nodes()
 	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
@@ -111,12 +111,12 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate time.Time) {
 		}
 
 		// Check if new readings came in
-		if lastUpdate.Equal(metrics.LatestTimestamp) {
+		if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
 			// No new readings
 			fmt.Printf("Skipped computing joules, no new readings, skipping ...\n")
 			continue
 		}
-		lastUpdate = metrics.LatestTimestamp
+		lastUpdate[name] = metrics.LatestTimestamp
 
 		// Compute new joule value
 		oldJoulesLabel := node.Labels[joulesLabelName]

@@ -6,5 +6,5 @@ metadata:
 spec:
   containers:
     - name: "monitor"
-      image: "gcr.io/bep-matosi/monitor:1.0.8"
+      image: "gcr.io/bep-matosi/monitor:1.0.9"
   restartPolicy: "Always"

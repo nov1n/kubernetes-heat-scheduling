@@ -24,7 +24,7 @@ const (
 	k8sPort                 = "8080"
 	updateInterval          = 5 * time.Second
 	jouleScaleFactor        = 0.000000001
-	heapsterService         = "http://heapster.kube-system" // DNS name for heapster service
+	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
 )
 

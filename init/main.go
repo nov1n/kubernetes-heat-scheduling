@@ -23,9 +23,22 @@ const (
 	joulesLabelName = "joules"
 )
 
+var client *k8sClient.Client
+var lastLabels = make(map[string]string)
+
 func main() {
+	// Create nodeclient
+	var err error
+	client, err = getClient()
+	if err != nil {
+		fmt.Printf("Error getting client: %v", err)
+		return
+	}
+
+	// Register handlers
 	http.HandleFunc("/", hello)
 	http.HandleFunc("/setup", setup)
+	http.HandleFunc("/reset", reset)
 	fmt.Printf("Listening on localhost%v", port)
 	http.ListenAndServe(":"+port, nil)
 }
@@ -48,19 +61,6 @@ func setup(w http.ResponseWriter, r *http.Request) {
 	parseFloatInto(&std, params.Get("std"))
 	fmt.Printf("mean='%v', std='%v'", mean, std)
 
-	// Create nodeclient
-	var client *k8sClient.Client
-	client, err := k8sClient.NewInCluster()
-	if err != nil {
-		clientConfig := k8sRestCl.Config{
-			Host: "http://" + net.JoinHostPort(k8sHost, k8sPort),
-		}
-		client, err = k8sClient.New(&clientConfig)
-		if err != nil {
-			logAndWrite(w, "Could not create kubernetes client: %v", err)
-			return
-		}
-	}
 	nodeClient := client.Nodes()
 
 	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
@@ -69,13 +69,52 @@ func setup(w http.ResponseWriter, r *http.Request) {
 		logAndWrite(w, "Could not list nodes: %v", err)
 		return
 	}
+
+	lastLabels = make(map[string]string)
 	for _, node := range nodes.Items {
 
 		joules := normFloat(std, mean)
 		joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
 		node.Labels[joulesLabelName] = joulesString
 		nodeClient.Update(&node)
+
+		// Update lastlabels to allow resets
+		lastLabels[node.Name] = joulesString
 		logAndWrite(w, "updated node %s label: %s=%s\n", node.Name, joulesLabelName, joulesString)
+	}
+}
+
+// getClient returns a kubernetes client
+func getClient() (*k8sClient.Client, error) {
+	client, err := k8sClient.NewInCluster()
+	if err != nil {
+		clientConfig := k8sRestCl.Config{
+			Host: "http://" + net.JoinHostPort(k8sHost, k8sPort),
+		}
+		client, err = k8sClient.New(&clientConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Could not create kubernetes client: %v", err)
+		}
+	}
+	return client, nil
+}
+
+// Reset sets the joule labels of all nodes to the value previously assigned by /setup
+func reset(w http.ResponseWriter, r *http.Request) {
+	nodeClient := client.Nodes()
+
+	if len(lastLabels) == 0 {
+		logAndWrite(w, "No last labels map, run /setup first")
+		return
+	}
+	for name, joules := range lastLabels {
+		node, err := nodeClient.Get(name)
+		if err != nil {
+			logAndWrite(w, fmt.Sprintf("Failed to get node '%s', skipping...", name))
+		}
+		node.Labels[joulesLabelName] = joules
+		nodeClient.Update(node)
+		logAndWrite(w, "updated node %s label: %s=%s\n", node.Name, joulesLabelName, joules)
 	}
 }
 
@@ -100,6 +139,7 @@ func parseFloatInto(dest *float64, source string) {
 	*dest = parsed
 }
 
+// logAndWrite writes to stdout and to the provided writer
 func logAndWrite(w io.Writer, template string, vars ...interface{}) {
 	fmt.Fprintf(w, template, vars...)
 	fmt.Printf(template, vars...)

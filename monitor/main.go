@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -23,7 +24,8 @@ const (
 	k8sHost                 = "127.0.0.1"
 	k8sPort                 = "8080"
 	updateInterval          = 5 * time.Second
-	jouleScaleFactor        = 0.000000001
+	defaultScaleFactor      = "0.0000000001"
+	scaleFactorEnv          = "SCALE_FACTOR"
 	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
 )
@@ -44,6 +46,12 @@ func main() {
 		return
 	}
 	fmt.Println("Created influx client")
+
+	// Set joules scale factor environment variable if not set
+	factorExists := os.Getenv(scaleFactorEnv) != ""
+	if !factorExists {
+		os.Setenv(scaleFactorEnv, defaultScaleFactor)
+	}
 
 	// Update loop
 	stopChan := make(chan struct{})
@@ -113,7 +121,7 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 		// Check if new readings came in
 		if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
 			// No new readings
-			fmt.Printf("Skipped computing joules, no new readings, skipping ...\n")
+			fmt.Printf("Skipped computing joules for node `%s`, no new readings...\n", name)
 			continue
 		}
 		lastUpdate[name] = metrics.LatestTimestamp
@@ -126,7 +134,10 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 			continue
 		}
 
-		difJoules, err := computeJoules(metrics, jouleScaleFactor)
+		scaleFactor := os.Getenv(scaleFactorEnv)
+		fmt.Printf("Scale factor: '%s'\t", scaleFactor)
+
+		difJoules, err := computeJoules(metrics, scaleFactor)
 		if err != nil {
 			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
 			continue
@@ -189,11 +200,17 @@ func parseMetrics(metricsJSON []byte) (*metrics, error) {
 }
 
 // computeJoules uses the metrics to calculate the new joule value for a node
-func computeJoules(metrics *metrics, jouleScaleFactor float64) (float64, error) {
+func computeJoules(metrics *metrics, jouleScaleFactor string) (float64, error) {
 	readings := metrics.Readings
 	l := len(readings)
-	fmt.Print(l)
-	joules := (readings[l-1].Value - readings[l-2].Value) * jouleScaleFactor
+
+	// Parse factor from string
+	parsedFactor, err := strconv.ParseFloat(jouleScaleFactor, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	joules := (readings[l-1].Value - readings[l-2].Value) * parsedFactor
 	return joules, nil
 }
 

@@ -1,7 +1,11 @@
 {
 "kind" : "Policy",
 "apiVersion" : "v1",
-"predicates" : [],
+"predicates" : [
+  {
+    "name": "PodFitsResources"
+  }
+],
 "extenders": [
     {
       "urlPrefix": "http://heat-scheduler-extdr-svc.heat-scheduling",

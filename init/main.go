@@ -8,8 +8,10 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 
 	"k8s.io/kubernetes/pkg/api"
+	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
 	k8sRestCl "k8s.io/kubernetes/pkg/client/restclient"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
@@ -17,10 +19,11 @@ import (
 )
 
 const (
-	k8sHost         = "127.0.0.1"
-	k8sPort         = "8080"
-	port            = "8090"
-	joulesLabelName = "joules"
+	k8sHost               = "127.0.0.1"
+	k8sPort               = "8080"
+	retryOnStatusConflict = 3
+	port                  = "8090"
+	joulesLabelName       = "joules"
 )
 
 var client *k8sClient.Client
@@ -66,24 +69,54 @@ func setup(w http.ResponseWriter, r *http.Request) {
 	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
 	nodes, err := nodeClient.List(listAll)
 	if err != nil {
-		logAndWrite(w, "Could not list nodes: %v", err)
+		fmt.Printf("Could not list nodes: %v\n", err)
 		return
 	}
 
 	lastLabels = make(map[string]string)
+	var counter int64 = 1
 	for _, node := range nodes.Items {
+		go func(node api.Node) {
+			// Log when done
+			defer func() {
+				fmt.Printf("%v/%v: updated node %s\n", counter, len(nodes.Items), node.Name)
+				atomic.AddInt64(&counter, 1)
+			}()
 
-		joules := normFloat(std, mean)
-		joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
-		node.Labels[joulesLabelName] = joulesString
-		_, err := nodeClient.Update(&node)
-		if err != nil {
-			logAndWrite(w, "Could not update node %s: %v", node.Name, err)
-		}
+			// Compute joule value
+			joules := normFloat(std, mean)
+			joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
+			// Retry on status conflict
+			for i := 0; ; i++ {
+				node.Labels[joulesLabelName] = joulesString
+				// Update node
+				_, updateErr := nodeClient.Update(&node)
+				if updateErr == nil {
+					break
+				}
+				if i >= retryOnStatusConflict {
+					fmt.Printf("Tried to update status of node %v, but amount of retries (%d) exceeded\n", node.Name, retryOnStatusConflict)
+					return
+				}
+				statusErr, ok := updateErr.(*k8sApiErr.StatusError)
+				if !ok {
+					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, updateErr)
+					return
+				}
+				newNode, getErr := nodeClient.Get(node.Name)
+				if getErr != nil {
+					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, getErr)
+					return
+				}
 
-		// Update lastlabels to allow resets
-		lastLabels[node.Name] = joulesString
-		logAndWrite(w, "updated node %s label: %s=%s\n", node.Name, joulesLabelName, joulesString)
+				// Use newer version from API server, chanage labels and try to update again
+				node = *newNode
+				fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying\n", node.Name, i, retryOnStatusConflict, statusErr)
+			}
+
+			// Update lastlabels to allow resets
+			lastLabels[node.Name] = joulesString
+		}(node)
 	}
 }
 
@@ -107,17 +140,17 @@ func reset(w http.ResponseWriter, r *http.Request) {
 	nodeClient := client.Nodes()
 
 	if len(lastLabels) == 0 {
-		logAndWrite(w, "No last labels map, run /setup first")
+		fmt.Printf("No last labels map, run /setup first\n")
 		return
 	}
 	for name, joules := range lastLabels {
 		node, err := nodeClient.Get(name)
 		if err != nil {
-			logAndWrite(w, fmt.Sprintf("Failed to get node '%s', skipping...", name))
+			fmt.Printf("Failed to get node '%s', skipping...\n", name)
 		}
 		node.Labels[joulesLabelName] = joules
 		nodeClient.Update(node)
-		logAndWrite(w, "updated node %s label: %s=%s\n", node.Name, joulesLabelName, joules)
+		fmt.Printf("updated node %s label: %s=%s\n", node.Name, joulesLabelName, joules)
 	}
 }
 
@@ -138,7 +171,6 @@ func parseFloatInto(dest *float64, source string) {
 		fmt.Printf("error converting string '%v' to float, using default\n", source)
 		return
 	}
-	fmt.Printf("converted string %v to float\n", source)
 	*dest = parsed
 }
 

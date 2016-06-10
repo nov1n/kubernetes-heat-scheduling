@@ -23,7 +23,7 @@ const (
 	joulesLabelName         = "joules"
 	k8sHost                 = "127.0.0.1"
 	k8sPort                 = "8080"
-	updateInterval          = 5 * time.Second
+	updateInterval          = 10 * time.Second
 	defaultScaleFactor      = "0.0000000001"
 	scaleFactorEnv          = "SCALE_FACTOR"
 	heapsterService         = "http://heapster-service.default" // DNS name for heapster service

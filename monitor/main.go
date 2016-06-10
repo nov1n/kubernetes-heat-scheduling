@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/influxdata/influxdb/client/v2"
@@ -28,6 +29,11 @@ const (
 	scaleFactorEnv          = "SCALE_FACTOR"
 	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
+)
+
+var (
+	mu         = sync.Mutex{} // guards lastUpdate
+	lastUpdate = make(map[string]time.Time)
 )
 
 func main() {
@@ -58,7 +64,6 @@ func main() {
 	ticker := time.NewTicker(updateInterval)
 	go func() {
 		fmt.Println("Starting")
-		lastUpdate := make(map[string]time.Time)
 		for {
 			select {
 			case <-ticker.C:
@@ -101,67 +106,71 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 
 	// Update every node
 	for _, node := range nodes.Items {
-		name := node.Name
+		go func(client *k8sClient.Client, influx *Client, node api.Node) {
+			name := node.Name
 
-		// Get metrics
-		metricsEndpoint := fmt.Sprintf(metricsEndpointTemplate, name)
-		metricsJSON, err := getMetricsJSON(metricsEndpoint)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			// Get metrics
+			metricsEndpoint := fmt.Sprintf(metricsEndpointTemplate, name)
+			metricsJSON, err := getMetricsJSON(metricsEndpoint)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		// Parse metrics
-		metrics, err := parseMetrics(metricsJSON)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			// Parse metrics
+			metrics, err := parseMetrics(metricsJSON)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		// Check if new readings came in
-		if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
-			// No new readings
-			fmt.Printf("Skipped computing joules for node `%s`, no new readings...\n", name)
-			continue
-		}
-		lastUpdate[name] = metrics.LatestTimestamp
+			// Check if new readings came in
+			mu.Lock()
+			if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
+				// No new readings
+				fmt.Printf("Skipped computing joules for node `%s`, no new readings...\n", name)
+				return
+			}
+			lastUpdate[name] = metrics.LatestTimestamp
+			mu.Unlock()
 
-		// Compute new joule value
-		oldJoulesLabel := node.Labels[joulesLabelName]
-		oldJoules, err := strconv.ParseFloat(oldJoulesLabel, 64)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			// Compute new joule value
+			oldJoulesLabel := node.Labels[joulesLabelName]
+			oldJoules, err := strconv.ParseFloat(oldJoulesLabel, 64)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		scaleFactor := os.Getenv(scaleFactorEnv)
-		fmt.Printf("Scale factor: '%s'\t", scaleFactor)
+			scaleFactor := os.Getenv(scaleFactorEnv)
+			fmt.Printf("Scale factor: '%s'\t", scaleFactor)
 
-		difJoules, err := computeJoules(metrics, scaleFactor)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			difJoules, err := computeJoules(metrics, scaleFactor)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		newJoules := oldJoules + difJoules
-		newJoulesLabel := fmt.Sprintf("%.2f", newJoules)
+			newJoules := oldJoules + difJoules
+			newJoulesLabel := fmt.Sprintf("%.2f", newJoules)
 
-		// Update node
-		node.Labels[joulesLabelName] = newJoulesLabel
-		_, err = nodeClient.Update(&node)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			// Update node
+			node.Labels[joulesLabelName] = newJoulesLabel
+			_, err = nodeClient.Update(&node)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		// Write updated joules to influx
-		err = influx.Insert(name, newJoules)
-		if err != nil {
-			fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-			continue
-		}
+			// Write updated joules to influx
+			err = influx.Insert(name, newJoules)
+			if err != nil {
+				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+				return
+			}
 
-		fmt.Printf("Updated joules label for node %s from %s to %s\n", name, oldJoulesLabel, newJoulesLabel)
+			fmt.Printf("Updated joules label for node %s from %s to %s\n", name, oldJoulesLabel, newJoulesLabel)
+		}(client, influx, node)
 	}
 }
 
@@ -226,6 +235,7 @@ const (
 // Client is able to insert Points into InfluxDB
 type Client struct {
 	HTTP client.Client
+	Mu   sync.Mutex
 }
 
 // NewInfluxClient returns a new Influx object
@@ -235,7 +245,6 @@ func NewInfluxClient() (*Client, error) {
 		Addr:     fmt.Sprintf("%s:%s", service, port),
 		Password: password,
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -254,11 +263,14 @@ func NewInfluxClient() (*Client, error) {
 	// Return Influx instance
 	return &Client{
 		HTTP: c,
+		Mu:   sync.Mutex{}, // Guards influx operations
 	}, nil
 }
 
 // Insert creates and inserts a Point for a given podName and joule value
 func (c *Client) Insert(nodeName string, joulesFloat float64) error {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
 	// Create a point
 	tags := map[string]string{
 		hostLabel: nodeName,

@@ -14,6 +14,7 @@ import (
 	"github.com/influxdata/influxdb/client/v2"
 
 	"k8s.io/kubernetes/pkg/api"
+	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
 	k8sRestCl "k8s.io/kubernetes/pkg/client/restclient"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
@@ -26,6 +27,7 @@ const (
 	k8sPort                 = "8080"
 	updateInterval          = 10 * time.Second
 	defaultScaleFactor      = "0.0000000001"
+	retryOnStatusConflict   = 3
 	scaleFactorEnv          = "SCALE_FACTOR"
 	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
@@ -104,9 +106,13 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 	}
 	fmt.Printf("Listed %v nodes\n", len(nodes.Items))
 
+	// Create channel for goroutine synchronization
+	readyChan := make(chan bool, len(nodes.Items))
+
 	// Update every node
 	for _, node := range nodes.Items {
 		go func(client *k8sClient.Client, influx *Client, node api.Node) {
+			defer func() { readyChan <- true }() // Report on readyChannel when done
 			name := node.Name
 
 			// Get metrics
@@ -129,6 +135,7 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 			if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
 				// No new readings
 				fmt.Printf("Skipped computing joules for node `%s`, no new readings...\n", name)
+				mu.Unlock()
 				return
 			}
 			lastUpdate[name] = metrics.LatestTimestamp
@@ -143,7 +150,6 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 			}
 
 			scaleFactor := os.Getenv(scaleFactorEnv)
-			fmt.Printf("Scale factor: '%s'\t", scaleFactor)
 
 			difJoules, err := computeJoules(metrics, scaleFactor)
 			if err != nil {
@@ -153,13 +159,34 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 
 			newJoules := oldJoules + difJoules
 			newJoulesLabel := fmt.Sprintf("%.2f", newJoules)
-
-			// Update node
 			node.Labels[joulesLabelName] = newJoulesLabel
-			_, err = nodeClient.Update(&node)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
+
+			// Retry on status conflict
+			for i := 0; ; i++ {
+				// Update node
+				_, updateErr := nodeClient.Update(&node)
+				if updateErr == nil {
+					break
+				}
+				if i >= retryOnStatusConflict {
+					fmt.Printf("Tried to update status of node %v, but amount of retries (%d) exceeded", name, retryOnStatusConflict)
+					return
+				}
+				statusErr, ok := updateErr.(*k8sApiErr.StatusError)
+				if !ok {
+					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, updateErr)
+					return
+				}
+				newNode, getErr := nodeClient.Get(name)
+				if getErr != nil {
+					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, getErr)
+					return
+				}
+
+				// Use newer version from API server, chanage labels and try to update again
+				node = *newNode
+				node.Labels[joulesLabelName] = newJoulesLabel
+				fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying", name, i, retryOnStatusConflict, statusErr)
 			}
 
 			// Write updated joules to influx
@@ -172,6 +199,11 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 			fmt.Printf("Updated joules label for node %s from %s to %s\n", name, oldJoulesLabel, newJoulesLabel)
 		}(client, influx, node)
 	}
+	for i := 0; i < len(nodes.Items); i++ {
+		fmt.Print(i)
+		<-readyChan
+	}
+	fmt.Println()
 }
 
 type metrics struct {
@@ -212,6 +244,9 @@ func parseMetrics(metricsJSON []byte) (*metrics, error) {
 func computeJoules(metrics *metrics, jouleScaleFactor string) (float64, error) {
 	readings := metrics.Readings
 	l := len(readings)
+	if l < 2 {
+		return 0, fmt.Errorf("Readings length was %v, must be at least 2", l)
+	}
 
 	// Parse factor from string
 	parsedFactor, err := strconv.ParseFloat(jouleScaleFactor, 64)
@@ -235,7 +270,6 @@ const (
 // Client is able to insert Points into InfluxDB
 type Client struct {
 	HTTP client.Client
-	Mu   sync.Mutex
 }
 
 // NewInfluxClient returns a new Influx object
@@ -263,14 +297,11 @@ func NewInfluxClient() (*Client, error) {
 	// Return Influx instance
 	return &Client{
 		HTTP: c,
-		Mu:   sync.Mutex{}, // Guards influx operations
 	}, nil
 }
 
 // Insert creates and inserts a Point for a given podName and joule value
 func (c *Client) Insert(nodeName string, joulesFloat float64) error {
-	c.Mu.Lock()
-	defer c.Mu.Unlock()
 	// Create a point
 	tags := map[string]string{
 		hostLabel: nodeName,

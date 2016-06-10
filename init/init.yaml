@@ -8,7 +8,7 @@ metadata:
 spec:
     containers:
         - name: "init"
-          image: "gcr.io/bep-matosi/init:1.0.2"
+          image: "gcr.io/nce-dsd2015/init:1.0.0"
           ports:
             - containerPort: 8090
     restartPolicy: "Always"

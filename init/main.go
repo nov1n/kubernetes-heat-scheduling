@@ -76,7 +76,10 @@ func setup(w http.ResponseWriter, r *http.Request) {
 		joules := normFloat(std, mean)
 		joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
 		node.Labels[joulesLabelName] = joulesString
-		nodeClient.Update(&node)
+		_, err := nodeClient.Update(&node)
+		if err != nil {
+			logAndWrite(w, "Could not update node %s: %v", node.Name, err)
+		}
 
 		// Update lastlabels to allow resets
 		lastLabels[node.Name] = joulesString

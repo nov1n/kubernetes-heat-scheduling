@@ -1,39 +1,35 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/influxdata/influxdb/client/v2"
+	"github.com/nov1n/kubernetes-heat-scheduling/monitor/pkg/heapster"
+	"github.com/nov1n/kubernetes-heat-scheduling/monitor/pkg/influx"
 
-	"k8s.io/kubernetes/pkg/api"
+	k8sApi "k8s.io/kubernetes/pkg/api"
 	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
 	k8sRestCl "k8s.io/kubernetes/pkg/client/restclient"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
+	k8sFields "k8s.io/kubernetes/pkg/fields"
+	k8sLabels "k8s.io/kubernetes/pkg/labels"
 )
 
 const (
-	joulesLabelName         = "joules"
-	k8sHost                 = "127.0.0.1"
-	k8sPort                 = "8080"
-	updateInterval          = 10 * time.Second
-	defaultScaleFactor      = "0.0000000001"
-	retryOnStatusConflict   = 3
-	scaleFactorEnv          = "SCALE_FACTOR"
-	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
-	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
+	joulesLabelName       = "joules"
+	k8sHost               = "127.0.0.1"
+	k8sPort               = "8080"
+	updateInterval        = 10 * time.Second
+	scaleFactor           = 0.0000000003
+	retryOnStatusConflict = 3
+	scaleFactorEnv        = "SCALE_FACTOR"
 )
 
 var (
+	// records when a node is last updated
 	mu         = sync.Mutex{} // guards lastUpdate
 	lastUpdate = make(map[string]time.Time)
 )
@@ -48,18 +44,12 @@ func main() {
 	fmt.Println("Created client")
 
 	// Create Influx client
-	influx, err := NewInfluxClient()
+	influx, err := influx.NewClient()
 	if err != nil {
 		fmt.Printf("Error creating influx client: %v\n", err)
 		return
 	}
 	fmt.Println("Created influx client")
-
-	// Set joules scale factor environment variable if not set
-	factorExists := os.Getenv(scaleFactorEnv) != ""
-	if !factorExists {
-		os.Setenv(scaleFactorEnv, defaultScaleFactor)
-	}
 
 	// Update loop
 	stopChan := make(chan struct{})
@@ -81,9 +71,12 @@ func main() {
 	<-stopChan
 }
 
+// getClient returns a kubernetes client
 func getClient() (*k8sClient.Client, error) {
+	// If we are running in a pod, this is the easiest way
 	client, err := k8sClient.NewInCluster()
 	if err != nil {
+		// We are not running in a pod so create a regular HTTP client
 		clientConfig := k8sRestCl.Config{
 			Host: "http://" + net.JoinHostPort(k8sHost, k8sPort),
 		}
@@ -95,10 +88,11 @@ func getClient() (*k8sClient.Client, error) {
 	return client, nil
 }
 
-func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time.Time) {
+// update is called every upupdateInterval and updates the joules labels on all nodes
+func update(client *k8sClient.Client, influx *influx.Client, lastUpdate map[string]time.Time) {
 	// List nodes
 	nodeClient := client.Nodes()
-	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
+	listAll := k8sApi.ListOptions{LabelSelector: k8sLabels.Everything(), FieldSelector: k8sFields.Everything()}
 	nodes, err := nodeClient.List(listAll)
 	if err != nil {
 		fmt.Printf("Could not list nodes, trying again in %v: %v\n", updateInterval, err)
@@ -111,221 +105,134 @@ func update(client *k8sClient.Client, influx *Client, lastUpdate map[string]time
 
 	// Update every node
 	for _, node := range nodes.Items {
-		go func(client *k8sClient.Client, influx *Client, node api.Node) {
-			defer func() { readyChan <- true }() // Report on readyChannel when done
-			name := node.Name
-
-			// Get metrics
-			metricsEndpoint := fmt.Sprintf(metricsEndpointTemplate, name)
-			metricsJSON, err := getMetricsJSON(metricsEndpoint)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
-			}
-
-			// Parse metrics
-			metrics, err := parseMetrics(metricsJSON)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
-			}
-
-			// Check if new readings came in
-			mu.Lock()
-			if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
-				// No new readings
-				fmt.Printf("Skipped computing joules for node `%s`, no new readings...\n", name)
-				mu.Unlock()
-				return
-			}
-			lastUpdate[name] = metrics.LatestTimestamp
-			mu.Unlock()
-
-			// Compute new joule value
-			oldJoulesLabel := node.Labels[joulesLabelName]
-			oldJoules, err := strconv.ParseFloat(oldJoulesLabel, 64)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
-			}
-
-			scaleFactor := os.Getenv(scaleFactorEnv)
-
-			difJoules, err := computeJoules(metrics, scaleFactor)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
-			}
-
-			newJoules := oldJoules + difJoules
-			newJoulesLabel := fmt.Sprintf("%.2f", newJoules)
-			node.Labels[joulesLabelName] = newJoulesLabel
-
-			// Retry on status conflict
-			for i := 0; ; i++ {
-				// Update node
-				_, updateErr := nodeClient.Update(&node)
-				if updateErr == nil {
-					break
-				}
-				if i >= retryOnStatusConflict {
-					fmt.Printf("Tried to update status of node %v, but amount of retries (%d) exceeded", name, retryOnStatusConflict)
-					return
-				}
-				statusErr, ok := updateErr.(*k8sApiErr.StatusError)
-				if !ok {
-					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, updateErr)
-					return
-				}
-				newNode, getErr := nodeClient.Get(name)
-				if getErr != nil {
-					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, getErr)
-					return
-				}
-
-				// Use newer version from API server, chanage labels and try to update again
-				node = *newNode
-				node.Labels[joulesLabelName] = newJoulesLabel
-				fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying", name, i, retryOnStatusConflict, statusErr)
-			}
-
-			// Write updated joules to influx
-			err = influx.Insert(name, newJoules)
-			if err != nil {
-				fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-				return
-			}
-
-			fmt.Printf("Updated joules label for node %s from %s to %s\n", name, oldJoulesLabel, newJoulesLabel)
-		}(client, influx, node)
+		go processNode(nodeClient, influx, node, readyChan)
 	}
+
+	// Wait for all updates to complete
 	for i := 0; i < len(nodes.Items); i++ {
-		fmt.Print(i)
 		<-readyChan
 	}
-	fmt.Println()
 }
 
-type metrics struct {
-	Readings        []metric  `json:"metrics"`
-	LatestTimestamp time.Time `json:"latestTimestamp"`
-}
+// processNode updates an individual node if new readings are available from heapster
+func processNode(nodeClient k8sClient.NodeInterface, influx *influx.Client, node k8sApi.Node, readyChan chan bool) {
+	defer func() { readyChan <- true }() // Report on readyChan when done
+	name := node.Name
 
-type metric struct {
-	Timestamp time.Time `json:"timestamp"`
-	Value     float64   `json:"value"`
-}
-
-// getMetricsJSON retrieves the latest metrics from heapster and returns the JSON
-func getMetricsJSON(endpoint string) ([]byte, error) {
-	resp, err := http.Get(heapsterService + endpoint)
+	// Get metrics
+	metrics, err := heapster.GetMetrics(name)
 	if err != nil {
-		return nil, fmt.Errorf("could not get metrics at endpoint %s: %v\n", endpoint, err)
+		fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+		return
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+
+	// Check if new readings came in
+	err = hasNewReadings(name, metrics)
 	if err != nil {
-		return nil, fmt.Errorf("could not read response body: %v\n", err)
+		fmt.Printf("Skipped computing joules for node `%s`: %v\n", name, err)
+		return
 	}
-	return body, nil
+
+	// Assign new joule value as label
+	newJoules, err := computeNewJoules(node, metrics)
+	if err != nil {
+		fmt.Printf("Could not compute joules for node `%s`: %v\n", name, err)
+		return
+	}
+	newJoulesLabel := fmt.Sprintf("%.2f", newJoules)
+	node.Labels[joulesLabelName] = newJoulesLabel
+
+	// Send the modified node object on the apiserver
+	err = updateNode(nodeClient, node, newJoulesLabel)
+	if err != nil {
+		fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+		return
+	}
+
+	// Write updated joules to influx
+	err = influx.Insert(name, newJoules)
+	if err != nil {
+		fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
+		return
+	}
+
+	fmt.Printf("Updated joules label for node %s", name)
 }
 
-// parseMetrics parses the metrics JSON into metrics struct
-func parseMetrics(metricsJSON []byte) (*metrics, error) {
-	metrics := &metrics{}
-	err := json.Unmarshal(metricsJSON, &metrics)
-	if err != nil {
-		return nil, fmt.Errorf("could not decode metrics response into json: %v\n", err)
+// updateNode returns nil if successful and an error otherwise
+func updateNode(nodeClient k8sClient.NodeInterface, node k8sApi.Node, newJoulesLabel string) error {
+	name := node.Name
+	for i := 0; ; i++ {
+		// Try update
+		_, updateErr := nodeClient.Update(&node)
+		if updateErr == nil {
+			// Success
+			return nil
+		}
+
+		// Check if we have reached retry limit
+		if i >= retryOnStatusConflict {
+			return fmt.Errorf("tried to update status of node %v, but amount of retries (%d) exceeded", name, retryOnStatusConflict)
+		}
+
+		// Check if it is a status error 409
+		statusErr, ok := updateErr.(*k8sApiErr.StatusError)
+		if !ok {
+			return fmt.Errorf("tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, updateErr)
+		}
+
+		// Get updated version from apiserver
+		newNode, getErr := nodeClient.Get(name)
+		if getErr != nil {
+			return fmt.Errorf("tried to update status of node %v in retry %d/%d, but got error: %v", name, i, retryOnStatusConflict, getErr)
+		}
+
+		// Use newer version from API server, chanage labels and try to update again
+		node = *newNode
+		node.Labels[joulesLabelName] = newJoulesLabel
+		fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying", name, i, retryOnStatusConflict, statusErr)
 	}
-	return metrics, nil
+}
+
+// computeJoulesLabel computes the new joules label for a node based on its old label and metrics
+func computeNewJoules(node k8sApi.Node, metrics *heapster.Metrics) (float64, error) {
+	oldJoulesLabel := node.Labels[joulesLabelName]
+	oldJoules, err := strconv.ParseFloat(oldJoulesLabel, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	difJoules, err := computeJoulesFromMetrics(metrics)
+	if err != nil {
+		return 0, err
+	}
+
+	newJoules := oldJoules + difJoules
+	return newJoules, nil
 }
 
 // computeJoules uses the metrics to calculate the new joule value for a node
-func computeJoules(metrics *metrics, jouleScaleFactor string) (float64, error) {
+func computeJoulesFromMetrics(metrics *heapster.Metrics) (float64, error) {
 	readings := metrics.Readings
 	l := len(readings)
 	if l < 2 {
 		return 0, fmt.Errorf("Readings length was %v, must be at least 2", l)
 	}
 
-	// Parse factor from string
-	parsedFactor, err := strconv.ParseFloat(jouleScaleFactor, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	joules := (readings[l-1].Value - readings[l-2].Value) * parsedFactor
+	joules := (readings[l-1].Value - readings[l-2].Value) * scaleFactor
 	return joules, nil
 }
 
-const (
-	service   = "http://nce-pm-influxdb.default"
-	db        = "k8s"
-	port      = "8086"
-	username  = "root"
-	password  = "root"
-	hostLabel = "hostname"
-)
-
-// Client is able to insert Points into InfluxDB
-type Client struct {
-	HTTP client.Client
-}
-
-// NewInfluxClient returns a new Influx object
-func NewInfluxClient() (*Client, error) {
-	// Make client
-	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     fmt.Sprintf("%s:%s", service, port),
-		Password: password,
-	})
-	if err != nil {
-		return nil, err
+// hasNewReadings returns nil if for a given node, heapster has new readings since we last updated
+// an error is returned otherwise
+func hasNewReadings(name string, metrics *heapster.Metrics) error {
+	mu.Lock()
+	if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
+		// No new readings
+		mu.Unlock()
+		return fmt.Errorf("no new readings")
 	}
-
-	// Create database if it does not yet exist
-	query := client.NewQuery(
-		"CREATE DATABASE IF NOT EXISTS joules",
-		db,
-		"s",
-	)
-	_, err = c.Query(query)
-	if err != nil {
-		return nil, err
-	}
-
-	// Return Influx instance
-	return &Client{
-		HTTP: c,
-	}, nil
-}
-
-// Insert creates and inserts a Point for a given podName and joule value
-func (c *Client) Insert(nodeName string, joulesFloat float64) error {
-	// Create a point
-	tags := map[string]string{
-		hostLabel: nodeName,
-	}
-	fields := map[string]interface{}{
-		"total": joulesFloat,
-	}
-	pt, err := client.NewPoint("joules", tags, fields, time.Now())
-	if err != nil {
-		return err
-	}
-
-	// Create a new point batch
-	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  db,
-		Precision: "s",
-	})
-	bp.AddPoint(pt)
-
-	// Write point to influx
-	err = c.HTTP.Write(bp)
-	if err != nil {
-		return err
-	}
-
+	lastUpdate[name] = metrics.LatestTimestamp
+	mu.Unlock()
 	return nil
 }

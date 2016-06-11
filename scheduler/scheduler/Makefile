@@ -17,12 +17,12 @@
 # `make container` will build a container-- you must supply a tag.
 # `make push` will push the container-- you must supply a tag.
 
-TAG = "latest"
+REPO = gcr.io/nce-dsd2015/
+NAME = heat-scheduler
+TAG = latest
 
-container:
-	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	docker build -t gcr.io/bep-matosi/heat-scheduler:$(TAG) .
+build:
+	docker build -t $(REPO)$(NAME):$(TAG) .
 
-push: container
-	$(if $(TAG),,$(error TAG is not defined. Use 'make tag' to see a suggestion))
-	gcloud docker push gcr.io/bep-matosi/heat-scheduler:$(TAG)
+push: build
+	gcloud docker push $(REPO)$(NAME):$(TAG)

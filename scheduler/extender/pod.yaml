@@ -8,7 +8,7 @@ metadata:
 spec:
     containers:
         - name: heat-scheduler-extdr
-          image: gcr.io/bep-matosi/heat-scheduler-extender:1.0.0
+          image: gcr.io/nce-dsd2015/heat-scheduler-extender:1.0.0
           ports:
             - containerPort: 8100
     restartPolicy: "Always"

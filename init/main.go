@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"math"
 	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
-	"sync/atomic"
 
 	"k8s.io/kubernetes/pkg/api"
 	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
@@ -39,16 +37,12 @@ func main() {
 	}
 
 	// Register handlers
-	http.HandleFunc("/", hello)
 	http.HandleFunc("/setup", setup)
 	http.HandleFunc("/reset", reset)
+
+	// Start webserver
 	fmt.Printf("Listening on localhost%v", port)
 	http.ListenAndServe(":"+port, nil)
-}
-
-func hello(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello!")
-	return
 }
 
 // Setup computes initial joule value for each node from a normal distribution.
@@ -66,6 +60,7 @@ func setup(w http.ResponseWriter, r *http.Request) {
 
 	nodeClient := client.Nodes()
 
+	// List all nodes
 	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
 	nodes, err := nodeClient.List(listAll)
 	if err != nil {
@@ -73,51 +68,63 @@ func setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Make new map for last labels, these are used for /reset
 	lastLabels = make(map[string]string)
-	var counter int64 = 1
+
+	// Update each node
 	for _, node := range nodes.Items {
-		go func(node api.Node) {
-			// Log when done
-			defer func() {
-				fmt.Printf("%v/%v: updated node %s\n", counter, len(nodes.Items), node.Name)
-				atomic.AddInt64(&counter, 1)
-			}()
-
-			// Compute joule value
-			joules := normFloat(std, mean)
-			joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
-			// Retry on status conflict
-			for i := 0; ; i++ {
-				node.Labels[joulesLabelName] = joulesString
-				// Update node
-				_, updateErr := nodeClient.Update(&node)
-				if updateErr == nil {
-					break
-				}
-				if i >= retryOnStatusConflict {
-					fmt.Printf("Tried to update status of node %v, but amount of retries (%d) exceeded\n", node.Name, retryOnStatusConflict)
-					return
-				}
-				statusErr, ok := updateErr.(*k8sApiErr.StatusError)
-				if !ok {
-					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, updateErr)
-					return
-				}
-				newNode, getErr := nodeClient.Get(node.Name)
-				if getErr != nil {
-					fmt.Printf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, getErr)
-					return
-				}
-
-				// Use newer version from API server, chanage labels and try to update again
-				node = *newNode
-				fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying\n", node.Name, i, retryOnStatusConflict, statusErr)
-			}
-
-			// Update lastlabels to allow resets
-			lastLabels[node.Name] = joulesString
-		}(node)
+		go processNode(node)
 	}
+}
+
+func processNode(node api.Node) {
+	// Log when done
+	defer func() {
+		fmt.Printf("Updated node %s\n", node.Name)
+	}()
+
+	// Compute joule value
+	joules := normFloat(std, mean)
+	joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
+
+	// Update the node
+	err = updateNode(node, joulesString)
+	if err != nil {
+		fmt.Printf("Tried to update node %v but failed: %v", node.Name, err)
+	}
+
+	// Update lastlabels to allow resets
+	lastLabels[node.Name] = joulesString
+}
+
+func updateNode(node api.Node, joulesString string) error {
+	// Retry on status conflict
+	for i := 0; ; i++ {
+		node.Labels[joulesLabelName] = joulesString
+		// Update node
+		_, updateErr := nodeClient.Update(&node)
+		if updateErr == nil {
+			break
+		}
+		if i >= retryOnStatusConflict {
+			return fmt.Errorf("tried to update status of node %v, but amount of retries (%d) exceeded\n", node.Name, retryOnStatusConflict)
+		}
+		statusErr, ok := updateErr.(*k8sApiErr.StatusError)
+		if !ok {
+			return fmt.Errorf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, updateErr)
+		}
+
+		// Try to update node on Kubernetes API server
+		newNode, getErr := nodeClient.Get(node.Name)
+		if getErr != nil {
+			return fmt.Errorf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, getErr)
+		}
+
+		// Use newer version from API server, chanage labels and try to update again
+		node = *newNode
+		fmt.Printf("Tried to update status of node %v in retry %d/%d, but encountered status error (%v), retrying\n", node.Name, i, retryOnStatusConflict, statusErr)
+	}
+	return nil
 }
 
 // getClient returns a kubernetes client
@@ -172,10 +179,4 @@ func parseFloatInto(dest *float64, source string) {
 		return
 	}
 	*dest = parsed
-}
-
-// logAndWrite writes to stdout and to the provided writer
-func logAndWrite(w io.Writer, template string, vars ...interface{}) {
-	fmt.Fprintf(w, template, vars...)
-	fmt.Printf(template, vars...)
 }

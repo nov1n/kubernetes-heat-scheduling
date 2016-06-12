@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-func TestInit(t *testing.T) {
-
-}
-
 func TestNormFloat(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		val := normFloat(50, 25)

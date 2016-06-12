@@ -8,20 +8,18 @@ import (
 	"net/http"
 	"strconv"
 
-	"k8s.io/kubernetes/pkg/api"
+	k8sApi "k8s.io/kubernetes/pkg/api"
 	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
 	k8sRestCl "k8s.io/kubernetes/pkg/client/restclient"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
-	"k8s.io/kubernetes/pkg/fields"
-	"k8s.io/kubernetes/pkg/labels"
 )
 
 const (
 	k8sHost               = "127.0.0.1"
 	k8sPort               = "8080"
-	retryOnStatusConflict = 3
-	port                  = "8090"
-	joulesLabelName       = "joules"
+	retryOnStatusConflict = 3        // # retries before giving up
+	port                  = "8090"   // webserver port
+	joulesLabelName       = "joules" // name of Kubernetes label assigned to a node
 )
 
 var client *k8sClient.Client
@@ -58,11 +56,9 @@ func setup(w http.ResponseWriter, r *http.Request) {
 	parseFloatInto(&std, params.Get("std"))
 	fmt.Printf("mean='%v', std='%v'", mean, std)
 
-	nodeClient := client.Nodes()
-
 	// List all nodes
-	listAll := api.ListOptions{LabelSelector: labels.Everything(), FieldSelector: fields.Everything()}
-	nodes, err := nodeClient.List(listAll)
+	listAll := k8sApi.ListOptions{}
+	nodes, err := client.Nodes().List(listAll)
 	if err != nil {
 		fmt.Printf("Could not list nodes: %v\n", err)
 		return
@@ -73,11 +69,13 @@ func setup(w http.ResponseWriter, r *http.Request) {
 
 	// Update each node
 	for _, node := range nodes.Items {
-		go processNode(node)
+		go processNode(node, mean, std)
 	}
 }
 
-func processNode(node api.Node) {
+// processNode processes a single node, assigning a temprature label with a
+// random value from a normal distribution with parameters mean and std
+func processNode(node k8sApi.Node, mean, std float64) {
 	// Log when done
 	defer func() {
 		fmt.Printf("Updated node %s\n", node.Name)
@@ -88,7 +86,7 @@ func processNode(node api.Node) {
 	joulesString := fmt.Sprintf("%.2f", joules) // Truncate at two decimals
 
 	// Update the node
-	err = updateNode(node, joulesString)
+	err := updateNode(node, joulesString)
 	if err != nil {
 		fmt.Printf("Tried to update node %v but failed: %v", node.Name, err)
 	}
@@ -97,12 +95,13 @@ func processNode(node api.Node) {
 	lastLabels[node.Name] = joulesString
 }
 
-func updateNode(node api.Node, joulesString string) error {
+// updateNode updates a single node retrying retryOnStatusConflict times before giving up
+func updateNode(node k8sApi.Node, joulesString string) error {
 	// Retry on status conflict
 	for i := 0; ; i++ {
 		node.Labels[joulesLabelName] = joulesString
 		// Update node
-		_, updateErr := nodeClient.Update(&node)
+		_, updateErr := client.Nodes().Update(&node)
 		if updateErr == nil {
 			break
 		}
@@ -115,7 +114,7 @@ func updateNode(node api.Node, joulesString string) error {
 		}
 
 		// Try to update node on Kubernetes API server
-		newNode, getErr := nodeClient.Get(node.Name)
+		newNode, getErr := client.Nodes().Get(node.Name)
 		if getErr != nil {
 			return fmt.Errorf("Tried to update status of node %v in retry %d/%d, but got error: %v\n", node.Name, i, retryOnStatusConflict, getErr)
 		}
@@ -127,7 +126,7 @@ func updateNode(node api.Node, joulesString string) error {
 	return nil
 }
 
-// getClient returns a kubernetes client
+// getClient returns a Kubernetes client
 func getClient() (*k8sClient.Client, error) {
 	client, err := k8sClient.NewInCluster()
 	if err != nil {

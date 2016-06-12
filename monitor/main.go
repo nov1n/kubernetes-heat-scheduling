@@ -52,23 +52,15 @@ func main() {
 	fmt.Println("Created influx client")
 
 	// Update loop
-	stopChan := make(chan struct{})
-	ticker := time.NewTicker(updateInterval)
-	go func() {
-		fmt.Println("Starting")
+	func() {
+		fmt.Println("Starting update loop")
 		for {
-			select {
-			case <-ticker.C:
-				fmt.Println("Updating...")
-				update(client, influx, lastUpdate)
-				fmt.Println("Update finished")
-			case <-stopChan:
-				ticker.Stop()
-				return
-			}
+			fmt.Println("Updating...")
+			update(client, influx, lastUpdate)
+			fmt.Println("Update finished")
+			time.Sleep(updateInterval)
 		}
 	}()
-	<-stopChan
 }
 
 // getClient returns a kubernetes client

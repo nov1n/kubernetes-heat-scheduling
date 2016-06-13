@@ -1,0 +1,14 @@
+
+apiVersion: v1
+kind: Service
+metadata:
+    name: heat-scheduler-extdr-svc
+    namespace: heat-scheduling
+spec:
+    ports:
+      -
+         port: 80
+         targetPort: 8100
+    selector:
+      sel: heat-scheduler-extdr
+    type: "LoadBalancer"

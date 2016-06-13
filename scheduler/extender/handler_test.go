@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	schedulerapi "k8s.io/kubernetes/plugin/pkg/scheduler/api"
+	k8sSchedulerApi "k8s.io/kubernetes/plugin/pkg/scheduler/api"
 
-	"k8s.io/kubernetes/pkg/api"
+	k8sApi "k8s.io/kubernetes/pkg/api"
 )
 
 // TestHandler tests the handler function.
@@ -20,8 +20,8 @@ func TestHandler(t *testing.T) {
 
 	// Input to send for test and expected value
 	expected := "node1"
-	args := &schedulerapi.ExtenderArgs{
-		Pod: api.Pod{},
+	args := &k8sSchedulerApi.ExtenderArgs{
+		Pod: k8sApi.Pod{},
 		Nodes: newNodeList(
 			newNode("node1", "50.5"),
 			newNode("node2", "70.5"),
@@ -44,7 +44,7 @@ func TestHandler(t *testing.T) {
 
 	// decode result from fake server
 	dec := json.NewDecoder(res.Body)
-	received := &schedulerapi.ExtenderFilterResult{}
+	received := &k8sSchedulerApi.ExtenderFilterResult{}
 	err = dec.Decode(received)
 	if err != nil {
 		t.Errorf("Error when trying to convert result to ExtenderFilterResult: %v", err)

@@ -3,13 +3,13 @@ package main
 import (
 	"testing"
 
-	"k8s.io/kubernetes/pkg/api"
+	k8sApi "k8s.io/kubernetes/pkg/api"
 )
 
 // TestSelectNodeSuccess tests selectNode using different inputs.
 func TestSelectNodeSuccess(t *testing.T) {
 	testCases := map[string]struct {
-		list     api.NodeList
+		list     k8sApi.NodeList
 		expected string
 	}{
 		"sorted": {
@@ -55,12 +55,12 @@ func TestSelectNodeSuccess(t *testing.T) {
 	}
 
 	for desc, tc := range testCases {
-		node, err := selectNode(&tc.list)
+		nodes, err := selectNode(&tc.list)
 		if err != nil {
 			t.Errorf("Error when testing case %v: %v", desc, err)
 		} else {
-			if node.Name != tc.expected {
-				t.Errorf("Test case %v: expected %v but got %v", desc, tc.expected, node.Name)
+			if nodes[0].Name != tc.expected {
+				t.Errorf("Test case %v: expected %v but got %v", desc, tc.expected, nodes[0].Name)
 			}
 		}
 	}

@@ -1,17 +1,17 @@
 package main
 
-import "k8s.io/kubernetes/pkg/api"
+import k8sApi "k8s.io/kubernetes/pkg/api"
 
 // this file contains functions that are shared among both test files.
 
-// newNode returns a new api.Node given a name and joules.
-func newNode(name string, joules string) api.Node {
+// newNode returns a new k8sApi.Node given a name and joules.
+func newNode(name string, joules string) k8sApi.Node {
 	jmap := make(map[string]string)
 	if joules != "" {
 		jmap["joules"] = joules
 	}
-	return api.Node{
-		ObjectMeta: api.ObjectMeta{
+	return k8sApi.Node{
+		ObjectMeta: k8sApi.ObjectMeta{
 			Name:   name,
 			Labels: jmap,
 		},
@@ -19,8 +19,8 @@ func newNode(name string, joules string) api.Node {
 }
 
 // newNodeList returns a node list.
-func newNodeList(nodes ...api.Node) api.NodeList {
-	return api.NodeList{
+func newNodeList(nodes ...k8sApi.Node) k8sApi.NodeList {
+	return k8sApi.NodeList{
 		Items: nodes,
 	}
 }

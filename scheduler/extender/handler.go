@@ -25,12 +25,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	logNodes(&received.Nodes)
 
 	// select the node to schedule on.
-	node, err := selectNode(&received.Nodes)
-	var items []k8sApi.Node
+	nodes, err := selectNode(&received.Nodes)
 	if err != nil {
 		fmt.Printf("Encountered error when selecting node: %v", err)
-	} else {
-		items = []k8sApi.Node{*node}
 	}
 
 	// return the result.
@@ -39,9 +36,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	enc.Encode(&k8sSchedulerApi.ExtenderFilterResult{
 		Nodes: k8sApi.NodeList{
-			Items: items,
+			Items: nodes,
 		},
 	})
-	fmt.Printf("Chose node %v (joules=%v) for pod %v\n", node.Name, node.Labels["joules"], received.Pod.Name)
+	fmt.Printf("Chose node %v (joules=%v) for pod %v\n", nodes[0].Name, nodes[0].Labels["joules"], received.Pod.Name)
 	return
 }

@@ -51,14 +51,18 @@ func main() {
 	}
 	fmt.Println("Created influx client")
 
+	ticker := time.NewTicker(updateInterval)
+
 	// Update loop
 	func() {
 		fmt.Println("Starting update loop")
 		for {
-			fmt.Println("Updating...")
-			update(client, influx, lastUpdate)
-			fmt.Println("Update finished")
-			time.Sleep(updateInterval)
+			select {
+			case <-ticker.C:
+				fmt.Println("Updating...")
+				update(client, influx, lastUpdate)
+				fmt.Println("Update finished")
+			}
 		}
 	}()
 }
@@ -219,12 +223,11 @@ func computeJoulesFromMetrics(metrics *heapster.Metrics) (float64, error) {
 // an error is returned otherwise
 func hasNewReadings(name string, metrics *heapster.Metrics) error {
 	mu.Lock()
+	defer mu.Unlock()
 	if lastUpd, ok := lastUpdate[name]; ok && lastUpd.Equal(metrics.LatestTimestamp) {
 		// No new readings
-		mu.Unlock()
 		return fmt.Errorf("no new readings")
 	}
 	lastUpdate[name] = metrics.LatestTimestamp
-	mu.Unlock()
 	return nil
 }

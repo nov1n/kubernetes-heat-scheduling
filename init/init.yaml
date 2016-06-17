@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+    name: "init"
+    namespace: "heat-scheduling"
+    labels:
+        sel: "init"
+spec:
+    containers:
+        - name: "init"
+          image: "gcr.io/nce-dsd2015/init:1.0.5"
+          ports:
+            - containerPort: 8090
+    restartPolicy: "Always"
+

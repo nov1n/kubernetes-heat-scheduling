@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nov1n/kubernetes-heat-scheduling/monitor/pkg/heapster"
-	"github.com/nov1n/kubernetes-heat-scheduling/monitor/pkg/influx"
 
 	k8sApi "k8s.io/kubernetes/pkg/api"
 	k8sApiErr "k8s.io/kubernetes/pkg/api/errors"
@@ -43,14 +42,6 @@ func main() {
 	}
 	fmt.Println("Created client")
 
-	// Create Influx client
-	influx, err := influx.NewClient()
-	if err != nil {
-		fmt.Printf("Error creating influx client: %v\n", err)
-		return
-	}
-	fmt.Println("Created influx client")
-
 	ticker := time.NewTicker(updateInterval)
 
 	// Update loop
@@ -60,7 +51,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				fmt.Println("Updating...")
-				update(client, influx, lastUpdate)
+				update(client, lastUpdate)
 				fmt.Println("Update finished")
 			}
 		}
@@ -85,7 +76,7 @@ func getClient() (*k8sClient.Client, error) {
 }
 
 // update is called every upupdateInterval and updates the joules labels on all nodes
-func update(client *k8sClient.Client, influx *influx.Client, lastUpdate map[string]time.Time) {
+func update(client *k8sClient.Client, lastUpdate map[string]time.Time) {
 	// List nodes
 	nodeClient := client.Nodes()
 	listAll := k8sApi.ListOptions{LabelSelector: k8sLabels.Everything(), FieldSelector: k8sFields.Everything()}
@@ -101,7 +92,7 @@ func update(client *k8sClient.Client, influx *influx.Client, lastUpdate map[stri
 
 	// Update every node
 	for _, node := range nodes.Items {
-		go processNode(nodeClient, influx, node, readyChan)
+		go processNode(nodeClient, node, readyChan)
 	}
 
 	// Wait for all updates to complete
@@ -111,7 +102,7 @@ func update(client *k8sClient.Client, influx *influx.Client, lastUpdate map[stri
 }
 
 // processNode updates an individual node if new readings are available from heapster
-func processNode(nodeClient k8sClient.NodeInterface, influx *influx.Client, node k8sApi.Node, readyChan chan bool) {
+func processNode(nodeClient k8sClient.NodeInterface, node k8sApi.Node, readyChan chan bool) {
 	defer func() { readyChan <- true }() // Report on readyChan when done
 	name := node.Name
 
@@ -140,13 +131,6 @@ func processNode(nodeClient k8sClient.NodeInterface, influx *influx.Client, node
 
 	// Send the modified node object on the apiserver
 	err = updateNode(nodeClient, node, newJoulesLabel)
-	if err != nil {
-		fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
-		return
-	}
-
-	// Write updated joules to influx
-	err = influx.Insert(name, newJoules)
 	if err != nil {
 		fmt.Printf("Error updating node '%v':%v, skipping...\n", name, err)
 		return

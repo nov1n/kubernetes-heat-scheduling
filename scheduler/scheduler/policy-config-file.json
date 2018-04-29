@@ -8,7 +8,7 @@
 ],
 "extenders": [
     {
-      "urlPrefix": "http://heat-scheduler-extdr-svc.heat-scheduling",
+      "urlPrefix": "http://heat-scheduler-extdr-svc.kube-system",
 			"apiVersion": "v1",
       "filterVerb": "filter",
       "enableHttps": false

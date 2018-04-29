@@ -10,7 +10,7 @@ import (
 
 const (
 	metricsEndpointTemplate = "/api/v1/model/nodes/%s/metrics/cpu/usage"
-	heapsterService         = "http://heapster-service.default" // DNS name for heapster service
+	heapsterService         = "http://heapster.kube-system" // DNS name for heapster service
 )
 
 // Metrics represents the heapster json response

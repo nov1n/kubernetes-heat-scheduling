@@ -16,7 +16,7 @@ import (
 
 const (
 	k8sHost               = "127.0.0.1"
-	k8sPort               = "8080"
+	k8sPort               = "8001"
 	retryOnStatusConflict = 3        // # retries before giving up
 	port                  = "8090"   // webserver port
 	joulesLabelName       = "joules" // name of Kubernetes label assigned to a node

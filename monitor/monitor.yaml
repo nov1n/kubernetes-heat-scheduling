@@ -2,9 +2,10 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: "monitor"
-  namespace: "heat-scheduling"
 spec:
   containers:
     - name: "monitor"
-      image: "gcr.io/nce-dsd2015/monitor:1.0.9"
+      # image: "gcr.io/nce-dsd2015/monitor:1.0.9"
+      image: "borismattijssen/nlz-heat"
+      imagePullPolicy: Always
   restartPolicy: "Always"

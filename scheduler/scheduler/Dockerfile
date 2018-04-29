@@ -1,2 +1,2 @@
-FROM onorua/kube-scheduler:v1.2.4
+FROM mritd/kube-scheduler-amd64
 ADD policy-config-file.json policy-config-file.json

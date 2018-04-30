@@ -2,13 +2,13 @@ apiVersion: v1
 kind: Pod
 metadata:
     name: heat-scheduler-extdr
-    namespace: kube-system
     labels:
         sel: heat-scheduler-extdr
 spec:
+    serviceAccountName: super
     containers:
         - name: heat-scheduler-extdr
-          image: borismattijssen/simpleserver
+          image: borismattijssen/heat-scheduler-extender:0.2.1
           # image: gcr.io/nce-dsd2015/heat-scheduler-extender:1.0.0
           ports:
             - containerPort: 8002

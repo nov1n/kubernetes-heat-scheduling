@@ -17,12 +17,12 @@
 # `make container` will build a container-- you must supply a tag.
 # `make push` will push the container-- you must supply a tag.
 
-REPO = gcr.io/nce-dsd2015/
+REPO = borismattijssen/
 NAME = heat-scheduler
-TAG = latest
+TAG = 0.2.1
 
 build:
 	docker build -t $(REPO)$(NAME):$(TAG) .
 
 push: build
-	gcloud docker push $(REPO)$(NAME):$(TAG)
+	docker push $(REPO)$(NAME):$(TAG)

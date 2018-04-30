@@ -6,7 +6,6 @@ metadata:
     tier: control-plane
     app: heat-scheduler
   name: heat-scheduler
-  namespace: kube-system
 spec:
   replicas: 1
   selector:
@@ -20,10 +19,11 @@ spec:
         app: heat-scheduler
         version: second
     spec:
+      serviceAccountName: super
       containers:
       - command: [/usr/local/bin/kube-scheduler, --address=0.0.0.0, --v=5,
                   --scheduler-name=heat-scheduler, --policy-config-file=policy-config-file.json]
-        image: borismattijssen/kube-scheduler
+        image: borismattijssen/heat-scheduler:0.2.1
         imagePullPolicy: Always
         livenessProbe:
           httpGet:

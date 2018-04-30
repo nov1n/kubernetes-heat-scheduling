@@ -41,7 +41,7 @@ func selectNode(nodes *k8sApi.NodeList) ([]k8sApi.Node, error) {
 // jouleFromLabels parses the joules from a node's label or returns
 // the max float value if the label doesn't exist.
 func jouleFromLabels(node *k8sApi.Node) float64 {
-	jouleString, exists := node.Labels["joules"]
+	jouleString, exists := node.Annotations["nerdalize/temp"]
 	if exists {
 		joule, err := strconv.ParseFloat(jouleString, 32)
 		if err == nil {
